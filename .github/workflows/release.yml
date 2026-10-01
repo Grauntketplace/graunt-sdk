@@ -1,0 +1,97 @@
+name: Release
+
+# Publishing a GitHub release tagged v<version> publishes graunt to npm and PyPI
+# through trusted publishing (OIDC). RELEASING.md has the one-time setup.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: The tag names the version all four places declare
+        run: |
+          set -euo pipefail
+          js=$(node -p 'require("./js/package.json").version')
+          js_const=$(sed -n 's/^export const VERSION = "\(.*\)";$/\1/p' js/src/version.ts)
+          py=$(sed -n 's/^version = "\(.*\)"$/\1/p' python/pyproject.toml)
+          py_const=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' python/src/graunt/_version.py)
+          echo "tag=${TAG} js=${js} js_const=${js_const} python=${py} python_const=${py_const}"
+          if [ "${TAG}" != "v${js}" ] || [ "${js}" != "${js_const}" ] || [ "${js}" != "${py}" ] || [ "${py}" != "${py_const}" ]; then
+            echo "::error::the release tag and the four declared versions disagree"
+            exit 1
+          fi
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Unit tests and the live quickstart, both clients
+        env:
+          GRAUNT_LIVE: "1"
+        run: |
+          set -euo pipefail
+          (cd js && npm ci && npm run typecheck && npm test && npm run test:live)
+          (cd python && pip install -e '.[test]' && pytest -q)
+
+  npm:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write # trusted publishing and provenance
+    defaults:
+      run:
+        working-directory: js
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: npm 11.5.1 or later (trusted publishing)
+        run: npm install -g npm@^11.5.1 && npm --version
+      - run: npm ci
+      - name: Publish
+        env:
+          # Read only by the first publish: npm cannot attach a trusted publisher
+          # to a package that does not exist yet. Once trusted publishing is
+          # configured the secret is deleted and npm authenticates through OIDC.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
+
+  pypi:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write # trusted publishing
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        working-directory: python
+        run: pip install build && python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: python/dist

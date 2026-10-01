@@ -1,0 +1,60 @@
+{
+  "name": "graunt",
+  "version": "0.1.0",
+  "description": "Client for the Graunt API, the marketplace for agent-ready data: search listings, read packet manifests, and use an access pass.",
+  "keywords": [
+    "graunt",
+    "agent-ready-data",
+    "data-marketplace",
+    "datasets",
+    "ai-agents",
+    "llm",
+    "provenance",
+    "data-rights",
+    "packet-manifest",
+    "api-client"
+  ],
+  "homepage": "https://graunt.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Grauntketplace/graunt-sdk.git",
+    "directory": "js"
+  },
+  "bugs": {
+    "url": "https://github.com/Grauntketplace/graunt-sdk/issues"
+  },
+  "license": "MIT",
+  "author": "Graunt, Inc.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test test/client.test.mjs",
+    "test:live": "npm run build && node --test test/live.test.mjs",
+    "prepublishOnly": "npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

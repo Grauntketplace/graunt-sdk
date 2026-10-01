@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Daily: the README quickstarts, run for real against api.graunt.com.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  js:
+    name: js (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22, 24]
+    defaults:
+      run:
+        working-directory: js
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: js/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: The package holds only dist, README, LICENSE and package.json
+        run: |
+          npm pack --dry-run --json > "${RUNNER_TEMP}/pack.json"
+          node -e '
+            const files = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))[0].files.map((f) => f.path);
+            const stray = files.filter((p) => !/^(dist\/.+\.(js|d\.ts)|README\.md|LICENSE|package\.json)$/.test(p));
+            console.log(files.join("\n"));
+            if (stray.length) { console.error("unexpected files in the package:", stray); process.exit(1); }
+          ' "${RUNNER_TEMP}/pack.json"
+
+  python:
+    name: python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e '.[test]'
+      - run: pytest -q
+      - name: The sdist and wheel build
+        run: pip install build && python -m build
+
+  live:
+    name: live quickstart against api.graunt.com
+    needs: [js, python]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GRAUNT_LIVE: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: JavaScript
+        working-directory: js
+        run: npm ci && npm run test:live
+      - name: Python
+        working-directory: python
+        run: pip install -e '.[test]' && pytest -q tests/test_live.py
