@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import re
 import socket
@@ -48,7 +49,8 @@ class FakeApi:
                 self.send_response(reply.status)
                 for name, value in reply.headers.items():
                     self.send_header(name, value)
-                self.send_header("Content-Length", str(len(reply.raw)))
+                if "Content-Length" not in reply.headers:
+                    self.send_header("Content-Length", str(len(reply.raw)))
                 self.end_headers()
                 self.wfile.write(reply.raw)
 
@@ -258,3 +260,41 @@ def test_get_returns_any_public_body_unchanged(api: FakeApi) -> None:
     assert Graunt(base_url=api.base_url).get("/v1/meta/search-contract", {"page": 1}) == {"ok": True, "data": {"anything": 1}}
     assert api.calls[0]["query"] == {"page": "1"}
     assert re.match(r"^/v1/meta/search-contract\?page=1$", api.calls[0]["raw_path"])
+
+
+def test_an_empty_pass_library_lists_nothing_and_its_manifest_names_the_code(api: FakeApi) -> None:
+    # The API answers an empty library with HTTP 200 and an {"ok": false} body.
+    api.route = lambda p, q, h: Reply({"ok": False, "error": {"code": "ACCESS_PASS_LIBRARY_EMPTY", "message": "No active entitlements or subscriptions to surface through this pass."}})
+    library = Graunt(base_url=api.base_url, access_pass=PASS).library
+    assert library.list() == []
+    with pytest.raises(GrauntError) as caught:
+        library.manifest()
+    assert (caught.value.status, caught.value.code) == (200, "ACCESS_PASS_LIBRARY_EMPTY")
+    assert "No active entitlements" in caught.value.message
+
+
+def test_any_ok_false_body_served_with_200_raises_its_own_code(api: FakeApi) -> None:
+    api.route = lambda p, q, h: Reply({"ok": False, "error": {"code": "SOMETHING_SPECIFIC", "message": "specific", "details": {"a": 1}}})
+    with pytest.raises(GrauntError) as caught:
+        Graunt(base_url=api.base_url).meta.pricing()
+    assert (caught.value.code, caught.value.details) == ("SOMETHING_SPECIFIC", {"a": 1})
+
+
+def test_a_body_cut_short_is_a_connection_error(api: FakeApi) -> None:
+    # Content-Length promises more than is sent; the server then closes: IncompleteRead.
+    api.route = lambda p, q, h: Reply(raw=b'{"ok": true, "da', headers={"Content-Length": "500"})
+    with pytest.raises(GrauntConnectionError) as caught:
+        Graunt(base_url=api.base_url, timeout=5).meta.capabilities()
+    assert isinstance(caught.value.__cause__, http.client.IncompleteRead)
+
+
+def test_base_url_may_not_carry_credentials() -> None:
+    with pytest.raises(ValueError, match="credentials"):
+        Graunt(base_url="https://user:secret@api.graunt.com")
+
+
+def test_a_manifest_that_is_not_utf8_is_unexpected_response(api: FakeApi) -> None:
+    api.route = lambda p, q, h: Reply(raw=b"{\xff\xfe}")
+    with pytest.raises(GrauntError) as caught:
+        Graunt(base_url=api.base_url).listings.manifest("l1")
+    assert caught.value.code == "UNEXPECTED_RESPONSE"

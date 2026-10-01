@@ -58,6 +58,9 @@ export class Transport {
     if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
       throw new TypeError("baseUrl must be an absolute http(s) URL.");
     }
+    if (parsed.username !== "" || parsed.password !== "") {
+      throw new TypeError("baseUrl must not contain credentials.");
+    }
     if (options.accessPass !== undefined && !ACCESS_PASS_PATTERN.test(options.accessPass)) {
       // The value is deliberately left out of the message: it is a credential.
       throw new TypeError("accessPass must be a Graunt access pass: gap_live_ followed by 64 hex characters.");
@@ -76,8 +79,12 @@ export class Transport {
     this.#fetch = fetchImpl;
   }
 
-  /** GET and return the raw response; throws on any non-2xx status. */
-  async send(path: string, options: SendOptions = {}): Promise<Response> {
+  /**
+   * GET and read the whole body. The body is read inside the same guard as the
+   * request, so a timeout or reset mid-body is a GrauntConnectionError too.
+   * Any non-2xx status becomes a GrauntError.
+   */
+  async fetchBody(path: string, options: SendOptions = {}): Promise<FetchedBody> {
     if (!path.startsWith("/")) throw new TypeError("path must start with /");
     const url = new URL(this.#baseUrl + path);
     for (const [key, value] of Object.entries(options.query ?? {})) {
@@ -96,6 +103,7 @@ export class Transport {
     // Errors name the origin and path only: a query can carry a search term.
     const where = `${url.origin}${url.pathname}`;
     let response: Response;
+    let body: ArrayBuffer;
     try {
       response = await this.#fetch(url, {
         method: "GET",
@@ -105,39 +113,49 @@ export class Transport {
         redirect: options.pass ? "error" : "follow",
         signal: AbortSignal.timeout(this.#timeoutMs),
       });
+      body = await response.arrayBuffer();
     } catch (err) {
       throw new GrauntConnectionError(`GET ${where} failed: ${describe(err)}`, { cause: err });
     }
-    if (!response.ok) throw await toGrauntError(response);
-    return response;
+    if (!response.ok) throw toGrauntError(response.status, response.statusText, response.headers, body);
+    return { status: response.status, headers: response.headers, body };
   }
 
-  /** GET a JSON body. */
-  async json(path: string, options: SendOptions = {}): Promise<unknown> {
-    const response = await this.send(path, options);
-    const text = await response.text();
+  /** GET a JSON body and the status it was served with. */
+  async json(path: string, options: SendOptions = {}): Promise<{ status: number; value: unknown }> {
+    const { status, body } = await this.fetchBody(path, options);
     try {
-      return JSON.parse(text);
+      return { status, value: JSON.parse(strictUtf8.decode(body)) };
     } catch {
-      throw new GrauntError({
-        status: response.status,
-        code: "UNEXPECTED_RESPONSE",
-        message: `GET ${path} returned a body that is not JSON.`,
-      });
+      throw new GrauntError({ status, code: "UNEXPECTED_RESPONSE", message: `GET ${path} returned a body that is not JSON.` });
     }
   }
 
-  /** GET Graunt's success envelope `{ ok: true, data }` and return `data`. */
+  /**
+   * GET Graunt's envelope and return `data`. A `{ ok: false, error }` body is a
+   * GrauntError even when served with 200, as an empty access-pass library is
+   * (`ACCESS_PASS_LIBRARY_EMPTY`).
+   */
   async data<T>(path: string, options: SendOptions = {}): Promise<T> {
-    const body = await this.json(path, options);
-    if (isRecord(body) && body.ok === true && "data" in body) return body.data as T;
+    const { status, value } = await this.json(path, options);
+    if (isRecord(value) && value.ok === true && "data" in value) return value.data as T;
+    const envelopeError = errorFromEnvelope(status, value);
+    if (envelopeError) throw envelopeError;
     throw new GrauntError({
-      status: 200,
+      status,
       code: "UNEXPECTED_RESPONSE",
-      message: `GET ${path} did not return Graunt's { ok: true, data } envelope.`,
+      message: `GET ${path} did not return Graunt's { ok, data } envelope.`,
     });
   }
 }
+
+interface FetchedBody {
+  status: number;
+  headers: Headers;
+  body: ArrayBuffer;
+}
+
+const strictUtf8 = new TextDecoder("utf-8", { fatal: true });
 
 /** Public catalog: search, listing detail and packet manifests. No credential needed. */
 export class ListingsResource {
@@ -174,23 +192,23 @@ export class ListingsResource {
    * served. A listing without a packet manifest answers 404 `NO_MANIFEST`.
    */
   async manifest(id: string): Promise<PacketManifest> {
-    const response = await this.#t.send(`/v1/listings/${segment(id, "id")}/manifest`);
-    const buffer = await response.arrayBuffer();
-    const canonicalJson = new TextDecoder().decode(buffer);
+    const { status, headers, body } = await this.#t.fetchBody(`/v1/listings/${segment(id, "id")}/manifest`);
+    let canonicalJson: string;
     let manifest: unknown;
     try {
+      canonicalJson = strictUtf8.decode(body);
       manifest = JSON.parse(canonicalJson);
     } catch {
-      throw new GrauntError({ status: response.status, code: "UNEXPECTED_RESPONSE", message: "The manifest is not JSON." });
+      throw new GrauntError({ status, code: "UNEXPECTED_RESPONSE", message: "The manifest is not UTF-8 JSON." });
     }
     if (!isRecord(manifest)) {
-      throw new GrauntError({ status: response.status, code: "UNEXPECTED_RESPONSE", message: "The manifest is not a JSON object." });
+      throw new GrauntError({ status, code: "UNEXPECTED_RESPONSE", message: "The manifest is not a JSON object." });
     }
     const signatureHeaders: Record<string, string> = {};
-    response.headers.forEach((value, name) => {
+    headers.forEach((value, name) => {
       if (name.toLowerCase().startsWith("x-graunt-")) signatureHeaders[name.toLowerCase()] = value;
     });
-    return { manifest, canonicalJson, sha256: await sha256Hex(buffer), signatureHeaders };
+    return { manifest, canonicalJson, sha256: await sha256Hex(body), signatureHeaders };
   }
 }
 
@@ -219,15 +237,23 @@ export class LibraryResource {
     this.#t = transport;
   }
 
-  /** The pass, its scope, and every item it can read. */
+  /**
+   * The pass, its scope, and every item it can read. A pass whose library is
+   * empty raises GrauntError with code `ACCESS_PASS_LIBRARY_EMPTY`.
+   */
   manifest(): Promise<LibraryManifest> {
     return this.#t.data<LibraryManifest>("/v1/access-passes/manifest", { pass: true });
   }
 
-  /** The resource IDs the pass can read. */
+  /** The resource IDs the pass can read; an empty array for an empty library. */
   async list(): Promise<string[]> {
-    const data = await this.#t.data<{ resource_ids: string[] }>("/v1/access-passes/resources", { pass: true });
-    return data.resource_ids;
+    try {
+      const data = await this.#t.data<{ resource_ids: string[] }>("/v1/access-passes/resources", { pass: true });
+      return data.resource_ids;
+    } catch (err) {
+      if (err instanceof GrauntError && err.code === "ACCESS_PASS_LIBRARY_EMPTY") return [];
+      throw err;
+    }
   }
 
   /** One readable item. An item outside the pass answers 404. */
@@ -260,8 +286,8 @@ export class Graunt {
   }
 
   /** GET any public endpoint and return its parsed JSON body unchanged. */
-  get(path: string, query: Record<string, string | number | boolean | undefined> = {}): Promise<unknown> {
-    return this.#t.json(path, { query });
+  async get(path: string, query: Record<string, string | number | boolean | undefined> = {}): Promise<unknown> {
+    return (await this.#t.json(path, { query })).value;
   }
 }
 
@@ -294,24 +320,31 @@ function segment(value: string, name: string): string {
   return encodeURIComponent(value);
 }
 
-async function toGrauntError(response: Response): Promise<GrauntError> {
-  let code = `HTTP_${response.status}`;
-  let message = response.statusText || `HTTP ${response.status}`;
-  let details: Record<string, unknown> | undefined;
-  const text = await response.text().catch(() => "");
+function toGrauntError(status: number, statusText: string, headers: Headers, body: ArrayBuffer): GrauntError {
+  const retryAfter = headers.get("retry-after");
+  const retryAfterSeconds = retryAfter !== null && /^\d+$/.test(retryAfter.trim()) ? Number(retryAfter.trim()) : undefined;
+  let parsed: unknown;
   try {
-    const body: unknown = JSON.parse(text);
-    if (isRecord(body) && isRecord(body.error)) {
-      if (typeof body.error.code === "string") code = body.error.code;
-      if (typeof body.error.message === "string") message = body.error.message;
-      if (isRecord(body.error.details)) details = body.error.details;
-    }
+    parsed = JSON.parse(new TextDecoder().decode(body));
   } catch {
     // A body that is not JSON (a proxy's HTML page, say) keeps the HTTP_<status> code.
   }
-  const retryAfter = response.headers.get("retry-after");
-  const retryAfterSeconds = retryAfter !== null && /^\d+$/.test(retryAfter.trim()) ? Number(retryAfter.trim()) : undefined;
-  return new GrauntError({ status: response.status, code, message, details, retryAfterSeconds });
+  return (
+    errorFromEnvelope(status, parsed, retryAfterSeconds) ??
+    new GrauntError({ status, code: `HTTP_${status}`, message: statusText || `HTTP ${status}`, retryAfterSeconds })
+  );
+}
+
+/** A GrauntError from Graunt's `{ ok: false, error: { code, message, details? } }`, or undefined. */
+function errorFromEnvelope(status: number, value: unknown, retryAfterSeconds?: number): GrauntError | undefined {
+  if (!isRecord(value) || !isRecord(value.error) || typeof value.error.code !== "string") return undefined;
+  return new GrauntError({
+    status,
+    code: value.error.code,
+    message: typeof value.error.message === "string" ? value.error.message : value.error.code,
+    details: isRecord(value.error.details) ? value.error.details : undefined,
+    retryAfterSeconds,
+  });
 }
 
 async function sha256Hex(buffer: ArrayBuffer): Promise<string> {

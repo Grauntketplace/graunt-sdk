@@ -28,7 +28,7 @@ npm attaches a trusted publisher only to a package that already exists, so the f
 2. Settings → Environments → `npm` → add the secret `NPM_TOKEN` with that token.
 3. Cut the first release (below).
 4. On npmjs.com, open **graunt → Settings → Trusted Publisher → GitHub Actions** and enter: organization `Grauntketplace`, repository `graunt-sdk`, workflow filename `release.yml`, environment `npm`. Then set **Publishing access** to require two-factor authentication and disallow tokens.
-5. Delete the `NPM_TOKEN` secret and revoke the token on npmjs.com.
+5. Delete the `NPM_TOKEN` secret and revoke the token on npmjs.com. From the next release on, the workflow configures no token and publishes through OIDC alone.
 
 ## Cutting a release
 

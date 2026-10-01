@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import re
 import urllib.error
@@ -70,6 +71,8 @@ class Graunt:
         parts = urllib.parse.urlsplit(base)
         if parts.scheme not in ("http", "https") or not parts.netloc:
             raise ValueError("base_url must be an absolute http(s) URL.")
+        if parts.username is not None or parts.password is not None:
+            raise ValueError("base_url must not contain credentials.")
         if access_pass is not None and not _ACCESS_PASS.match(access_pass):
             # The value is deliberately left out of the message: it is a credential.
             raise ValueError("access_pass must be a Graunt access pass: gap_live_ followed by 64 hex characters.")
@@ -123,7 +126,8 @@ class Graunt:
                 return response.status, _lower(response.headers.items()), response.read()
         except urllib.error.HTTPError as err:
             raise _to_error(err) from None
-        except (urllib.error.URLError, TimeoutError, OSError) as err:
+        except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as err:
+            # HTTPException covers a body cut short mid-read (IncompleteRead).
             reason = getattr(err, "reason", err)
             raise GrauntConnectionError(f"GET {where} failed: {_describe(reason)}") from err
 
@@ -132,10 +136,15 @@ class Graunt:
         parsed = _parse_json(status, body, path)
         if isinstance(parsed, dict) and parsed.get("ok") is True and "data" in parsed:
             return parsed["data"]
+        # An { ok: false, error } body is an error even when served with 200,
+        # as an empty access-pass library is (ACCESS_PASS_LIBRARY_EMPTY).
+        envelope_error = _error_from_envelope(status, parsed)
+        if envelope_error is not None:
+            raise envelope_error
         raise GrauntError(
             status=status,
             code="UNEXPECTED_RESPONSE",
-            message=f"GET {path} did not return Graunt's {{ok: true, data}} envelope.",
+            message=f"GET {path} did not return Graunt's {{ok, data}} envelope.",
         )
 
 
@@ -218,11 +227,11 @@ class Listings:
         """
         path = f"/v1/listings/{_segment(listing_id, 'listing_id')}/manifest"
         status, headers, body = self._client._send(path)
-        canonical = body.decode("utf-8")
         try:
+            canonical = body.decode("utf-8")
             manifest = json.loads(canonical)
-        except ValueError:
-            raise GrauntError(status=status, code="UNEXPECTED_RESPONSE", message="The manifest is not JSON.") from None
+        except ValueError:  # UnicodeDecodeError is a ValueError too
+            raise GrauntError(status=status, code="UNEXPECTED_RESPONSE", message="The manifest is not UTF-8 JSON.") from None
         if not isinstance(manifest, dict):
             raise GrauntError(status=status, code="UNEXPECTED_RESPONSE", message="The manifest is not a JSON object.")
         signature = {name: value for name, value in headers.items() if name.startswith("x-graunt-")}
@@ -256,12 +265,21 @@ class Library:
         self._client = client
 
     def manifest(self) -> LibraryManifest:
-        """The pass, its scope, and every item it can read."""
+        """The pass, its scope, and every item it can read.
+
+        A pass whose library is empty raises :class:`GrauntError` with code
+        ``ACCESS_PASS_LIBRARY_EMPTY``.
+        """
         return cast(LibraryManifest, self._client._data("/v1/access-passes/manifest", use_pass=True))
 
     def list(self) -> List[str]:
-        """The resource IDs the pass can read."""
-        data = self._client._data("/v1/access-passes/resources", use_pass=True)
+        """The resource IDs the pass can read; an empty list for an empty library."""
+        try:
+            data = self._client._data("/v1/access-passes/resources", use_pass=True)
+        except GrauntError as err:
+            if err.code == "ACCESS_PASS_LIBRARY_EMPTY":
+                return []
+            raise
         return list(data["resource_ids"])
 
     def get(self, resource_id: str) -> LibraryEntitlement:
@@ -295,24 +313,33 @@ def _parse_json(status: int, body: bytes, path: str) -> Any:
 
 def _to_error(err: urllib.error.HTTPError) -> GrauntError:
     status = err.code
-    code = f"HTTP_{status}"
-    message = err.reason if isinstance(err.reason, str) and err.reason else f"HTTP {status}"
-    details: Optional[Dict[str, Any]] = None
-    try:
-        body = json.loads(err.read().decode("utf-8"))
-    except (ValueError, OSError):
-        body = None  # A body that is not JSON keeps the HTTP_<status> code.
-    if isinstance(body, dict) and isinstance(body.get("error"), dict):
-        error = body["error"]
-        if isinstance(error.get("code"), str):
-            code = error["code"]
-        if isinstance(error.get("message"), str):
-            message = error["message"]
-        if isinstance(error.get("details"), dict):
-            details = error["details"]
     retry_after = err.headers.get("Retry-After") if err.headers is not None else None
     retry_after_seconds = int(retry_after.strip()) if retry_after and retry_after.strip().isdigit() else None
-    return GrauntError(status=status, code=code, message=message, details=details, retry_after_seconds=retry_after_seconds)
+    try:
+        body = json.loads(err.read().decode("utf-8"))
+    except (ValueError, OSError, http.client.HTTPException):
+        body = None  # A body that is not JSON keeps the HTTP_<status> code.
+    from_envelope = _error_from_envelope(status, body, retry_after_seconds)
+    if from_envelope is not None:
+        return from_envelope
+    message = err.reason if isinstance(err.reason, str) and err.reason else f"HTTP {status}"
+    return GrauntError(status=status, code=f"HTTP_{status}", message=message, retry_after_seconds=retry_after_seconds)
+
+
+def _error_from_envelope(status: int, body: Any, retry_after_seconds: Optional[int] = None) -> Optional[GrauntError]:
+    """A GrauntError from Graunt's {"ok": false, "error": {code, message, details?}}, or None."""
+    if not isinstance(body, dict) or not isinstance(body.get("error"), dict):
+        return None
+    error = body["error"]
+    if not isinstance(error.get("code"), str):
+        return None
+    return GrauntError(
+        status=status,
+        code=error["code"],
+        message=error["message"] if isinstance(error.get("message"), str) else error["code"],
+        details=error["details"] if isinstance(error.get("details"), dict) else None,
+        retry_after_seconds=retry_after_seconds,
+    )
 
 
 def _describe(reason: Any) -> str:

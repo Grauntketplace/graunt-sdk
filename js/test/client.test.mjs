@@ -208,3 +208,50 @@ test("get() returns any public endpoint's body unchanged", async () => {
   assert.deepEqual(body, { ok: true, data: { anything: 1 } });
   assert.equal(fetch.calls[0].url.search, "?page=1");
 });
+
+test("an empty pass library: list() is [] and manifest() names ACCESS_PASS_LIBRARY_EMPTY (served as 200)", async () => {
+  // The API answers an empty library with HTTP 200 and an { ok: false } body.
+  const empty = { ok: false, error: { code: "ACCESS_PASS_LIBRARY_EMPTY", message: "No active entitlements or subscriptions to surface through this pass." } };
+  const fetch = fakeFetch(() => json(empty));
+  const library = new Graunt({ fetch, accessPass: PASS }).library;
+  assert.deepEqual(await library.list(), []);
+  const err = await library.manifest().catch((e) => e);
+  assert.ok(err instanceof GrauntError);
+  assert.equal(err.code, "ACCESS_PASS_LIBRARY_EMPTY");
+  assert.equal(err.status, 200);
+  assert.match(err.message, /No active entitlements/);
+});
+
+test("any { ok: false } body served with 200 raises its own code, not UNEXPECTED_RESPONSE", async () => {
+  const fetch = fakeFetch(() => json({ ok: false, error: { code: "SOMETHING_SPECIFIC", message: "specific", details: { a: 1 } } }));
+  const err = await new Graunt({ fetch }).meta.pricing().catch((e) => e);
+  assert.equal(err.code, "SOMETHING_SPECIFIC");
+  assert.deepEqual(err.details, { a: 1 });
+});
+
+test("a connection that breaks mid-body is a GrauntConnectionError, not a raw stream error", async () => {
+  const fetch = async () =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"ok":true,"da'));
+          controller.error(new TypeError("terminated"));
+        },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  const err = await new Graunt({ fetch }).meta.capabilities().catch((e) => e);
+  assert.ok(err instanceof GrauntConnectionError, `got ${err?.name}`);
+  assert.match(err.message, /terminated/);
+});
+
+test("baseUrl may not carry credentials", () => {
+  assert.throws(() => new Graunt({ baseUrl: "https://user:secret@api.graunt.com" }), /credentials/);
+});
+
+test("a manifest that is not valid UTF-8 is UNEXPECTED_RESPONSE", async () => {
+  const fetch = async () => new Response(new Uint8Array([0x7b, 0xff, 0xfe, 0x7d]), { status: 200, headers: { "content-type": "application/json" } });
+  const err = await new Graunt({ fetch }).listings.manifest("l1").catch((e) => e);
+  assert.ok(err instanceof GrauntError);
+  assert.equal(err.code, "UNEXPECTED_RESPONSE");
+});

@@ -1,6 +1,6 @@
 # graunt
 
-Client for the [Graunt](https://graunt.com) API. Graunt is the marketplace for agent-ready data: every listing carries declared rights, provenance and content hashes.
+Client for the [Graunt](https://graunt.com) API. Graunt is the marketplace for agent-ready data.
 
 ```sh
 npm install graunt
@@ -50,6 +50,8 @@ for (const item of library.active_entitlements) {
   console.log(item.listing_title, item.delivery_kind);
 }
 ```
+
+A pass whose library is empty returns `[]` from `library.list()`, and `library.manifest()` raises `GrauntError` with code `ACCESS_PASS_LIBRARY_EMPTY`.
 
 The client sends the pass only on `library` calls, refuses redirects on those calls so the pass reaches nothing but the configured origin, and never puts the pass in an error message.
 
