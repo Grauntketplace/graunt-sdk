@@ -293,6 +293,16 @@ def test_base_url_may_not_carry_credentials() -> None:
         Graunt(base_url="https://user:secret@api.graunt.com")
 
 
+def test_an_access_pass_goes_over_https_or_over_http_only_to_localhost() -> None:
+    for base_url in ("http://api.graunt.com", "http://10.0.0.5:8080"):
+        with pytest.raises(ValueError, match="only over https"):
+            Graunt(base_url=base_url, access_pass=PASS)
+    for base_url in ("https://api.graunt.com", "http://localhost:3000", "http://127.0.0.1:3000", "http://[::1]:3000"):
+        Graunt(base_url=base_url, access_pass=PASS)
+    # Without a pass there is nothing to protect, so plain http stays allowed.
+    Graunt(base_url="http://api.graunt.com")
+
+
 def test_a_manifest_that_is_not_utf8_is_unexpected_response(api: FakeApi) -> None:
     api.route = lambda p, q, h: Reply(raw=b"{\xff\xfe}")
     with pytest.raises(GrauntError) as caught:

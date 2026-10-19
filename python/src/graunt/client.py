@@ -26,6 +26,8 @@ DEFAULT_BASE_URL = "https://api.graunt.com"
 DEFAULT_TIMEOUT = 30.0
 # The shape the API itself enforces before any lookup.
 _ACCESS_PASS = re.compile(r"^gap_live_[0-9a-fA-F]{64}$")
+# The only hosts an access pass may reach over plain http.
+_LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
 
 
 @dataclass(frozen=True)
@@ -76,6 +78,9 @@ class Graunt:
         if access_pass is not None and not _ACCESS_PASS.match(access_pass):
             # The value is deliberately left out of the message: it is a credential.
             raise ValueError("access_pass must be a Graunt access pass: gap_live_ followed by 64 hex characters.")
+        if access_pass is not None and parts.scheme == "http" and parts.hostname not in _LOOPBACK_HOSTS:
+            # A pass is a credential: plain http is for a server on this machine only.
+            raise ValueError("An access pass is sent only over https, or over http to localhost.")
         if not timeout > 0:
             raise ValueError("timeout must be a positive number of seconds.")
         self._base_url = base

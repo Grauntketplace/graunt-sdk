@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { inspect } from "node:util";
 
 import { Graunt, GrauntConnectionError, GrauntError, VERSION } from "../dist/index.js";
 
@@ -247,6 +248,34 @@ test("a connection that breaks mid-body is a GrauntConnectionError, not a raw st
 
 test("baseUrl may not carry credentials", () => {
   assert.throws(() => new Graunt({ baseUrl: "https://user:secret@api.graunt.com" }), /credentials/);
+});
+
+test("a fetch that quotes the request when it throws cannot carry the pass into the error", async () => {
+  const fetch = async (url, init) => {
+    throw new Error(`refused ${url} with ${JSON.stringify(init.headers)}`, { cause: init });
+  };
+  const graunt = new Graunt({ fetch, accessPass: PASS });
+  for (const call of [() => graunt.library.manifest(), () => graunt.library.list(), () => graunt.library.get("r1")]) {
+    const err = await call().catch((e) => e);
+    assert.ok(err instanceof GrauntConnectionError, `got ${err?.name}`);
+    assert.equal(err.cause, undefined);
+    assert.ok(!JSON.stringify({ message: err.message, stack: err.stack }).includes(PASS));
+    assert.ok(!inspect(err, { depth: 10 }).includes(PASS));
+  }
+  // A catalog call carries no pass, so its error keeps the underlying detail.
+  const open = await new Graunt({ fetch }).meta.pricing().catch((e) => e);
+  assert.match(open.message, /refused/);
+  assert.ok(open.cause instanceof Error);
+});
+
+test("an access pass goes over https, or over http only to localhost", () => {
+  assert.throws(() => new Graunt({ baseUrl: "http://api.graunt.com", accessPass: PASS }), /only over https/);
+  assert.throws(() => new Graunt({ baseUrl: "http://10.0.0.5:8080", accessPass: PASS }), /only over https/);
+  for (const baseUrl of ["https://api.graunt.com", "http://localhost:3000", "http://127.0.0.1:3000", "http://[::1]:3000"]) {
+    assert.doesNotThrow(() => new Graunt({ baseUrl, accessPass: PASS }), baseUrl);
+  }
+  // Without a pass there is nothing to protect, so plain http stays allowed.
+  assert.doesNotThrow(() => new Graunt({ baseUrl: "http://api.graunt.com" }));
 });
 
 test("a manifest that is not valid UTF-8 is UNEXPECTED_RESPONSE", async () => {
