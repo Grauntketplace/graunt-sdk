@@ -8,6 +8,8 @@ Every release publishes `graunt` to npm and PyPI from [`release.yml`](.github/wo
 
 Settings → Environments: create `npm` and `pypi`. For each, under **Deployment branches and tags**, allow only tags matching `v*`.
 
+Settings → Rules → Rulesets: one ruleset keeps `main` from being deleted or force-pushed, and another keeps every `v*` tag from being deleted or moved, so a published version always points at the commit it was built from.
+
 ### PyPI
 
 PyPI creates the project on its first trusted publish, through a pending publisher. Sign in at [pypi.org](https://pypi.org) with two-factor authentication, open **Your account → Publishing**, and add a pending GitHub publisher:
