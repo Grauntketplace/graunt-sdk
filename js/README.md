@@ -53,7 +53,7 @@ for (const item of library.active_entitlements) {
 
 A pass whose library is empty returns `[]` from `library.list()`, and `library.manifest()` raises `GrauntError` with code `ACCESS_PASS_LIBRARY_EMPTY`.
 
-The client sends the pass only on `library` calls, refuses redirects on those calls so the pass reaches nothing but the configured origin, and never puts the pass in an error message.
+The client sends the pass only on `library` calls and only over https (plain http is accepted for localhost alone), refuses redirects on those calls so the pass reaches nothing but the configured origin, and never puts the pass in an error message or its `cause`.
 
 ## Errors
 

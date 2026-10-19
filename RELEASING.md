@@ -35,6 +35,6 @@ npm attaches a trusted publisher only to a package that already exists, so the f
 1. Set the same version in all four places: `js/package.json`, `js/src/version.ts`, `python/pyproject.toml` and `python/src/graunt/_version.py`. The unit tests fail when a constant disagrees with its manifest, and the release workflow refuses a tag that disagrees with any of them.
 2. Merge to `main` with CI green.
 3. Publish a GitHub release with the tag `v<version>` (for example `v0.1.0`) on `main`.
-4. The workflow runs both clients' unit tests and the live quickstart against api.graunt.com, then publishes both packages. When a check fails, nothing is published.
+4. The workflow's `build` job runs both clients' unit tests and the live quickstart against api.graunt.com, packs the npm tarball, builds the sdist and wheel with pinned tools, and installs each into a clean consumer that runs the quickstart. Only then do the `npm` and `pypi` jobs, the only ones allowed to request an OIDC token, download those exact files and publish them; they check out, install and build nothing. When a check fails, nothing is published.
 
 Published versions are permanent on both registries. A mistake is corrected by publishing a new version.

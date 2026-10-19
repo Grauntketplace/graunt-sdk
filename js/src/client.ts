@@ -14,6 +14,8 @@ const DEFAULT_BASE_URL = "https://api.graunt.com";
 const DEFAULT_TIMEOUT_MS = 30_000;
 /** The shape the API itself enforces before any lookup (HR-35). */
 const ACCESS_PASS_PATTERN = /^gap_live_[0-9a-fA-F]{64}$/;
+/** The only hosts an access pass may reach over plain http. */
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 export interface GrauntOptions {
   /** API origin. Defaults to `https://api.graunt.com`. */
@@ -65,6 +67,10 @@ export class Transport {
       // The value is deliberately left out of the message: it is a credential.
       throw new TypeError("accessPass must be a Graunt access pass: gap_live_ followed by 64 hex characters.");
     }
+    if (options.accessPass !== undefined && parsed.protocol === "http:" && !LOOPBACK_HOSTS.has(parsed.hostname)) {
+      // A pass is a credential: plain http is for a server on this machine only.
+      throw new TypeError("An access pass is sent only over https, or over http to localhost.");
+    }
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
       throw new TypeError("timeoutMs must be a positive number.");
@@ -115,6 +121,12 @@ export class Transport {
       });
       body = await response.arrayBuffer();
     } catch (err) {
+      if (options.pass) {
+        // An injected fetch is free to quote the request, headers included, in
+        // what it throws. On a call that carries the pass neither its message
+        // nor the error itself is kept, so the pass cannot ride out on either.
+        throw new GrauntConnectionError(`GET ${where} failed: ${isTimeout(err) ? "timed out" : "the request did not complete"}`);
+      }
       throw new GrauntConnectionError(`GET ${where} failed: ${describe(err)}`, { cause: err });
     }
     if (!response.ok) throw toGrauntError(response.status, response.statusText, response.headers, body);
@@ -356,10 +368,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isTimeout(err: unknown): boolean {
+  return err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+}
+
 function describe(err: unknown): string {
-  if (err instanceof Error) {
-    if (err.name === "TimeoutError" || err.name === "AbortError") return "timed out";
-    return err.message;
-  }
-  return String(err);
+  if (isTimeout(err)) return "timed out";
+  return err instanceof Error ? err.message : String(err);
 }
