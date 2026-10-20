@@ -59,6 +59,8 @@ export interface ListingDetail extends ListingSummary {
   rights_passport?: Record<string, unknown>;
   packet_bundle?: Record<string, unknown> | null;
   related_listings?: unknown[];
+  /** When the seller last moved this listing to a newer revision (ISO 8601), or null. Holders get the update free. */
+  revision_updated_at?: string | null;
 }
 
 export interface Pagination {
