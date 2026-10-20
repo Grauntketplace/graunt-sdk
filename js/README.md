@@ -3,7 +3,7 @@
 Client for the [Graunt](https://graunt.com) API. Graunt is the marketplace for agent-ready data.
 
 ```sh
-npm install graunt
+npm install @graunt/sdk
 ```
 
 Node.js 20 or later, or any runtime with `fetch` and Web Crypto. No runtime dependencies.
@@ -11,7 +11,7 @@ Node.js 20 or later, or any runtime with `fetch` and Web Crypto. No runtime depe
 ## Quickstart
 
 ```js
-import { Graunt } from "graunt";
+import { Graunt } from "@graunt/sdk";
 
 const graunt = new Graunt();
 
@@ -63,7 +63,7 @@ The client sends the pass only on `library` calls and only over https (plain htt
 | `GrauntConnectionError` | No response: DNS, connection, TLS, or the timeout. | `message`, `cause` |
 
 ```js
-import { GrauntError } from "graunt";
+import { GrauntError } from "@graunt/sdk";
 
 try {
   await graunt.listings.get("not-a-listing");

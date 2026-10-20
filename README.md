@@ -4,7 +4,7 @@ Clients for the [Graunt](https://graunt.com) API. Graunt is the marketplace for 
 
 | Language | Package | Install | Docs |
 |---|---|---|---|
-| JavaScript and TypeScript | [`graunt` on npm](https://www.npmjs.com/package/graunt) | `npm install graunt` | [js/README.md](js/README.md) |
+| JavaScript and TypeScript | [`@graunt/sdk` on npm](https://www.npmjs.com/package/@graunt/sdk) | `npm install @graunt/sdk` | [js/README.md](js/README.md) |
 | Python | [`graunt` on PyPI](https://pypi.org/project/graunt/) | `pip install graunt` | [python/README.md](python/README.md) |
 
 Both clients cover the same surface:
