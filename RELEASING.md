@@ -1,6 +1,6 @@
 # Releasing
 
-Every release publishes `graunt` to npm and PyPI from [`release.yml`](.github/workflows/release.yml) through trusted publishing (OIDC). No long-lived registry token lives in this repository, and npm attaches provenance to each version.
+Every release publishes `@graunt/sdk` to npm and `graunt` to PyPI from [`release.yml`](.github/workflows/release.yml) through trusted publishing (OIDC). No long-lived registry token lives in this repository, and npm attaches provenance to each version.
 
 ## One-time setup
 
@@ -24,12 +24,12 @@ PyPI creates the project on its first trusted publish, through a pending publish
 
 ### npm
 
-npm attaches a trusted publisher only to a package that already exists, so the first version is published with a short-lived token and every later version through OIDC.
+npm attaches a trusted publisher only to a package that already exists, so the first version is published with a short-lived token and every later version through OIDC. npm refuses the unscoped name `graunt` as too close to `grunt`, so the npm package lives under the `graunt` account's own scope.
 
-1. Sign in at [npmjs.com](https://www.npmjs.com) with two-factor authentication. **Access Tokens → Generate New Token → Granular Access Token**: read and write on packages, expiry 7 days.
+1. Sign in at [npmjs.com](https://www.npmjs.com) with two-factor authentication. **Access Tokens → Generate New Token → Granular Access Token**: read and write on packages, **Bypass two-factor authentication** ticked (CI cannot answer a one-time code), expiry 7 days.
 2. Settings → Environments → `npm` → add the secret `NPM_TOKEN` with that token.
 3. Cut the first release (below).
-4. On npmjs.com, open **graunt → Settings → Trusted Publisher → GitHub Actions** and enter: organization `Grauntketplace`, repository `graunt-sdk`, workflow filename `release.yml`, environment `npm`. Then set **Publishing access** to require two-factor authentication and disallow tokens.
+4. On npmjs.com, open **@graunt/sdk → Settings → Trusted Publisher → GitHub Actions** and enter: organization `Grauntketplace`, repository `graunt-sdk`, workflow filename `release.yml`, environment `npm`. Then set **Publishing access** to require two-factor authentication and disallow tokens.
 5. Delete the `NPM_TOKEN` secret and revoke the token on npmjs.com. From the next release on, the workflow configures no token and publishes through OIDC alone.
 
 ## Cutting a release

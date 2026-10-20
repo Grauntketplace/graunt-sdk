@@ -79,13 +79,13 @@ jobs:
           npm init -y >/dev/null
           npm install --no-audit --no-fund "${RUNNER_TEMP}"/npm/graunt-*.tgz
           node --input-type=module -e '
-            import { Graunt, GrauntError, VERSION } from "graunt";
+            import { Graunt, GrauntError, VERSION } from "@graunt/sdk";
             const graunt = new Graunt();
             const { listings, pagination } = await graunt.listings.search({ limit: 1 });
             if (!Array.isArray(listings) || typeof pagination.total !== "number") throw new Error("unexpected search shape");
             console.log("esm ok", VERSION, pagination.total, typeof GrauntError);
           '
-          node -e 'const { Graunt } = require("graunt"); if (typeof Graunt !== "function") process.exit(1); console.log("require ok");'
+          node -e 'const { Graunt } = require("@graunt/sdk"); if (typeof Graunt !== "function") process.exit(1); console.log("require ok");'
       - name: The wheel installs into a clean environment and runs the quickstart
         run: |
           set -euo pipefail
