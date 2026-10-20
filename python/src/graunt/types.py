@@ -50,6 +50,8 @@ class ListingDetail(ListingSummary, total=False):
     rights_passport: dict
     packet_bundle: Optional[dict]
     related_listings: List[Any]
+    #: When the seller last moved this listing to a newer revision (ISO 8601), or None.
+    revision_updated_at: Optional[str]
 
 
 class Pagination(TypedDict):
