@@ -1,6 +1,6 @@
 {
   "name": "graunt",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Client for the Graunt API, the marketplace for agent-ready data: search listings, read packet manifests, and use an access pass.",
   "keywords": [
     "graunt",

@@ -141,7 +141,7 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm config set "//registry.npmjs.org/:_authToken" "${NPM_TOKEN}"
       - name: Publish the tarball the build job tested
-        run: npm publish dist/graunt-*.tgz --access public --provenance
+        run: npm publish ./dist/graunt-*.tgz --access public --provenance
 
   pypi:
     needs: build
