@@ -1,6 +1,6 @@
 # Graunt SDK
 
-Clients for the [Graunt](https://graunt.com) API. Graunt is the marketplace for agent-ready data.
+Clients for the [Graunt](https://graunt.com) API. Graunt is the agent-native marketplace for AI data.
 
 | Language | Package | Install | Docs |
 |---|---|---|---|

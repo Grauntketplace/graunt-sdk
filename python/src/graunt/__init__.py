@@ -1,4 +1,4 @@
-"""Client for the Graunt API, the marketplace for agent-ready data."""
+"""Client for the Graunt API, the agent-native marketplace for AI data."""
 
 from ._version import __version__
 from .client import DEFAULT_BASE_URL, Graunt, PacketManifest
