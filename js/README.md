@@ -1,6 +1,6 @@
 # graunt
 
-Client for the [Graunt](https://graunt.com) API. Graunt is the marketplace for agent-ready data.
+Client for the [Graunt](https://graunt.com) API. Graunt is the agent-native marketplace for AI data.
 
 ```sh
 npm install @graunt/sdk

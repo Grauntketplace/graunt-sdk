@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "graunt"
-version = "0.1.3"
-description = "Client for the Graunt API, the marketplace for agent-ready data: search listings, read packet manifests, and use an access pass."
+version = "0.1.4"
+description = "Client for the Graunt API, the agent-native marketplace for AI data: search listings, read packet manifests, and use an access pass."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
